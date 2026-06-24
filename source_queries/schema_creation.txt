@@ -1,0 +1,5 @@
+Create schema if not exists bronze;
+Create schema if not exists silver;
+Create schema if not exists gold;
+Create schema if not exists log;
+Create schema if not exists staging;

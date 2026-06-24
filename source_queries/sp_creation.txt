@@ -1,0 +1,151 @@
+
+-- Create using direct execution; Unable to create via sql_executor.py;
+
+CREATE OR REPLACE PROCEDURE staging.scd2_upsert(
+    p_run_date          DATE,
+    p_staging_table     TEXT,
+    p_target_table      TEXT,
+    p_pk_columns        TEXT[],        
+    p_non_pk_columns    TEXT[]         
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    pk_list            TEXT;
+    pk_list_s          TEXT;
+    non_pk_list        TEXT;
+    non_pk_list_s      TEXT;
+    pk_hash_expr       TEXT;
+    diff_hash_expr     TEXT;
+BEGIN
+
+    -- 1. Build column lists
+    SELECT string_agg(quote_ident(col), ', ')
+      INTO pk_list
+    FROM unnest(p_pk_columns) col;
+
+    SELECT string_agg('s.' || quote_ident(col), ', ')
+      INTO pk_list_s
+    FROM unnest(p_pk_columns) col;
+
+    SELECT string_agg(quote_ident(col), ', ')
+      INTO non_pk_list
+    FROM unnest(p_non_pk_columns) col;
+
+    SELECT string_agg('s.' || quote_ident(col), ', ')
+      INTO non_pk_list_s
+    FROM unnest(p_non_pk_columns) col;
+
+    -- Build expressions for MD5
+    SELECT string_agg(quote_ident(col) || '::text', ',''::''')
+      INTO pk_hash_expr
+    FROM unnest(p_pk_columns) col;
+
+    SELECT string_agg(quote_ident(col) || '::text', ',''::''')
+      INTO diff_hash_expr
+    FROM unnest(p_non_pk_columns) col;
+
+    -- Step 2: Add required columns if missing
+    EXECUTE format('
+        ALTER TABLE %I 
+        ADD COLUMN IF NOT EXISTS hash_pk TEXT,
+        ADD COLUMN IF NOT EXISTS hash_diff TEXT,
+        ADD COLUMN IF NOT EXISTS rec_start DATE,
+        ADD COLUMN IF NOT EXISTS rec_end DATE,
+        ADD COLUMN IF NOT EXISTS is_active BOOLEAN;
+    ', p_staging_table);
+
+    -- Step 3: Calculate hashes in staging
+    EXECUTE format('
+        UPDATE %I
+        SET 
+            hash_pk   = MD5(CONCAT_WS('':::'', %s)),
+            hash_diff = MD5(CONCAT_WS('':::'', %s)),
+            rec_start = %L,
+            rec_end   = ''9999-12-31''::DATE,
+            is_active = TRUE
+        WHERE hash_pk IS NULL OR hash_diff IS NULL;
+    ', 
+        p_staging_table,
+        pk_hash_expr,
+        diff_hash_expr,
+        p_run_date
+    );
+
+    -- Step 4: SCD2 Merge Logic
+    EXECUTE format($dynamic$
+        WITH source AS (
+            SELECT * FROM %I
+        ),
+        expire_old AS (
+            UPDATE %I t
+            SET rec_end   = %L::DATE - 1,
+                is_active = FALSE
+            FROM source s
+            WHERE t.hash_pk = s.hash_pk
+              AND t.is_active = TRUE
+              AND t.hash_diff <> s.hash_diff
+        )
+        INSERT INTO %I (
+            %s, hash_pk, hash_diff, rec_start, rec_end, is_active, loaded_at
+        )
+        SELECT 
+            %s,
+            s.hash_pk,
+            s.hash_diff,
+            s.rec_start,
+            s.rec_end,
+            s.is_active,
+            NOW()
+        FROM source s
+        WHERE NOT EXISTS (
+            SELECT 1 
+            FROM %I t 
+            WHERE t.hash_pk = s.hash_pk 
+              AND t.is_active = TRUE
+              AND t.hash_diff = s.hash_diff
+        );
+    $dynamic$,
+        p_staging_table,
+        p_target_table,
+        p_run_date,
+        p_target_table,
+        pk_list,
+        pk_list_s,
+        p_target_table
+    );
+
+    RAISE NOTICE 'SCD2 Upsert completed successfully for % on %', p_target_table, p_run_date;
+
+END;
+$$;
+
+
+
+
+SELECT 
+    routine_schema AS schema_name,
+    routine_name AS procedure_name,
+    routine_definition AS definition,
+    data_type AS return_type
+FROM information_schema.routines
+WHERE routine_type = 'PROCEDURE'
+ORDER BY routine_schema, routine_name;
+--AND routine_schema NOT IN ('pg_catalog', 'information_schema')
+
+
+
+SELECT 
+    routine_schema AS schema_name,
+    routine_name AS procedure_name,
+    data_type AS return_type
+FROM information_schema.routines
+WHERE routine_type = 'PROCEDURE'
+ORDER BY routine_schema, routine_name;
+--AND routine_schema NOT IN ('pg_catalog', 'information_schema')
+
+
+
+
+
+

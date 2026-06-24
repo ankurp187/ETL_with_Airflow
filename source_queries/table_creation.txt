@@ -1,0 +1,99 @@
+
+------------------------------------------------------- LOG TABLES ----------------------------------------------
+
+Create Table if not exists log.file_process_status(
+Run_ID varchar(500)
+, run_start_time varchar(500)
+, run_status varchar(500)
+, filename varchar(500)
+);
+
+Create Table if not exists log.logging_table(
+Run_ID varchar(500)
+, run_start_time varchar(500)
+, run_end_time varchar(500)
+, schema_name varchar(500)
+, object_name varchar(500)
+, start_date varchar(500)
+, end_date varchar(500)
+, filename varchar(500)
+, inserted_records varchar(500)
+, updated_records varchar(500)
+, comments varchar(500)
+);
+
+------------------------------------------------------- BRONZE TABLES ----------------------------------------------
+
+Create table if not exists bronze.accounts(
+account_id varchar(500), account_type varchar(500), currency varchar(500), open_date varchar(500), status varchar(500), balance varchar(500), record_date varchar(500)
+);
+
+Create table if not exists bronze.account_customer(
+account_id varchar(500), customer_id varchar(500), relationship_type varchar(500), start_date varchar(500)
+);
+
+Create table if not exists bronze.customers(
+customer_id varchar(500), full_name varchar(500), date_of_birth varchar(500), nationality varchar(500), occupation varchar(500), risk_score varchar(500), record_date varchar(500)
+);
+
+Create table if not exists bronze.customer_customer(
+customer_id1 varchar(500), customer_id2 varchar(500), relationship_type varchar(500), start_date varchar(500)
+);
+
+Create table if not exists bronze.transactions(
+transaction_id varchar(500), transaction_date varchar(500), transaction_timestamp varchar(500), account_from varchar(500), account_to varchar(500), amount varchar(500), currency varchar(500), transaction_type varchar(500), description varchar(500), channel varchar(500)
+);
+
+
+------------------------------------------------------- STAGING TABLES ----------------------------------------------
+
+
+Take all the data from raw tables and add it to truncated staging table.
+
+
+Create table if not exists staging.accounts(
+account_id varchar(500), account_type varchar(500), currency varchar(500), open_date varchar(500), status varchar(500), balance varchar(500), record_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists staging.account_customer(
+account_id varchar(500), customer_id varchar(500), relationship_type varchar(500), start_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists staging.customers(
+customer_id varchar(500), full_name varchar(500), date_of_birth varchar(500), nationality varchar(500), occupation varchar(500), risk_score varchar(500), record_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists staging.customer_customer(
+customer_id1 varchar(500), customer_id2 varchar(500), relationship_type varchar(500), start_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists staging.transactions(
+transaction_id varchar(500), transaction_date varchar(500), transaction_timestamp varchar(500), account_from varchar(500), account_to varchar(500), amount varchar(500), currency varchar(500), transaction_type varchar(500), description varchar(500), channel varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+
+
+
+------------------------------------------------------- SILVER TABLES ----------------------------------------------
+
+
+Create table if not exists silver.accounts(
+account_id varchar(500), account_type varchar(500), currency varchar(500), open_date varchar(500), status varchar(500), balance varchar(500), record_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists silver.account_customer(
+account_id varchar(500), customer_id varchar(500), relationship_type varchar(500), start_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists silver.customers(
+customer_id varchar(500), full_name varchar(500), date_of_birth varchar(500), nationality varchar(500), occupation varchar(500), risk_score varchar(500), record_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists silver.customer_customer(
+customer_id1 varchar(500), customer_id2 varchar(500), relationship_type varchar(500), start_date varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
+Create table if not exists silver.transactions(
+transaction_id varchar(500), transaction_date varchar(500), transaction_timestamp varchar(500), account_from varchar(500), account_to varchar(500), amount varchar(500), currency varchar(500), transaction_type varchar(500), description varchar(500), channel varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
+);
+
