@@ -1,6 +1,6 @@
 
 from airflow.decorators import dag, task
-from airflow.providers.postgres.operators.postgres import PostgresOperator
+# from airflow.providers.postgres.operators.postgres import PostgresOperator
 # from airflow.providers.postgres.hooks.postgres import PostgresHook
 from datetime import datetime
 import psycopg2
