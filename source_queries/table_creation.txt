@@ -97,3 +97,281 @@ Create table if not exists silver.transactions(
 transaction_id varchar(500), transaction_date varchar(500), transaction_timestamp varchar(500), account_from varchar(500), account_to varchar(500), amount varchar(500), currency varchar(500), transaction_type varchar(500), description varchar(500), channel varchar(500), hash_pk varchar(500), hash_diff varchar(500), rec_start DATE, rec_end DATE, is_active BOOLEAN
 );
 
+Create table if not exists staging.metadata(
+    layer_name varchar(500),run_date varchar(500), is_active int
+);
+
+Insert into staging.metadata
+VALUES
+('raw_data','20260616',1),
+('bronze','2026-06-16',1),
+('silver','2026-06-16',1);
+
+
+-----------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+CREATE SCHEMA IF NOT EXISTS gold;
+
+-- =============================================
+-- 1. Daily Account Summary
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.daily_account_summary (
+    account_id          TEXT,
+    transaction_date    DATE,
+    account_type        TEXT,
+    total_transactions  INTEGER,
+    total_amount        NUMERIC(18,2),
+    avg_amount          NUMERIC(18,2),
+    max_amount          NUMERIC(18,2),
+    suspicious_count    INTEGER,
+    high_value_count    INTEGER,
+    distinct_counterparties INTEGER,
+    loaded_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id, transaction_date)
+);
+
+-- =============================================
+-- 2. Customer Risk Profile (Daily)
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.customer_risk_profile (
+    customer_id             TEXT PRIMARY KEY,
+    full_name               TEXT,
+    risk_score              INTEGER,
+    total_txn_count         INTEGER,
+    total_volume            NUMERIC(20,2),
+    avg_txn_amount          NUMERIC(18,2),
+    suspicious_txn_count    INTEGER,
+    high_risk_txn_ratio     NUMERIC(5,2),
+    distinct_counterparties INTEGER,
+    max_single_txn          NUMERIC(18,2),
+    last_transaction_date   DATE,
+    risk_category           TEXT,           
+    loaded_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- 3. Enriched Transaction Monitoring
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.transaction_monitoring (
+    transaction_id      TEXT PRIMARY KEY,
+    transaction_date    DATE,
+    account_from        TEXT,
+    account_to          TEXT,
+    customer_from       TEXT,
+    customer_to         TEXT,
+    amount              NUMERIC(18,2),
+    transaction_type    TEXT,
+    is_suspicious       BOOLEAN,
+    risk_score          INTEGER,
+    rule_triggered      TEXT[],
+    alert_generated     BOOLEAN DEFAULT FALSE,
+    loaded_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- 4. Alerts Table
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.alerts (
+    alert_id            SERIAL PRIMARY KEY,
+    transaction_id      TEXT,
+    customer_id         TEXT,
+    account_id          TEXT,
+    alert_type          TEXT,               
+    severity            TEXT,               
+    alert_date          DATE,
+    description         TEXT,
+    status              TEXT DEFAULT 'New', 
+    loaded_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- Gold Table: Monthly Customer Metrics
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.monthly_customer_metrics (
+    customer_id                 TEXT,
+    year_month                  TEXT,           
+    total_transactions          INTEGER,
+    total_volume                NUMERIC(20,2),
+    avg_transaction_amount      NUMERIC(18,2),
+    max_transaction_amount      NUMERIC(18,2),
+    distinct_counterparties     INTEGER,
+    suspicious_transactions     INTEGER,
+    high_value_transactions     INTEGER,
+    txn_frequency               NUMERIC(10,2),      
+    risk_score_avg              NUMERIC(5,2),
+    loaded_at                   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (customer_id, year_month)
+);
+
+
+
+TRUNCATE TABLE gold.daily_account_summary;
+
+INSERT INTO gold.daily_account_summary
+SELECT 
+    a.account_id,
+    t.transaction_date,
+    a.account_type,
+    COUNT(*) AS total_transactions,
+    SUM(t.amount) AS total_amount,
+    AVG(t.amount) AS avg_amount,
+    MAX(t.amount) AS max_amount,
+    COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) AS suspicious_count,
+    COUNT(CASE WHEN t.amount > 50000 THEN 1 END) AS high_value_count,
+    COUNT(DISTINCT t.account_to) AS distinct_counterparties,
+    NOW() AS loaded_at
+FROM silver.transactions t
+JOIN silver.dim_account a ON t.account_from = a.account_id
+WHERE t.transaction_date = CURRENT_DATE - 1        
+GROUP BY a.account_id, t.transaction_date, a.account_type;
+
+
+TRUNCATE TABLE gold.customer_risk_profile;
+
+INSERT INTO gold.customer_risk_profile
+SELECT 
+    c.customer_id,
+    c.full_name,
+    c.risk_score,
+    COUNT(t.transaction_id) AS total_txn_count,
+    SUM(t.amount) AS total_volume,
+    AVG(t.amount) AS avg_txn_amount,
+    COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) AS suspicious_txn_count,
+    ROUND(COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END)::NUMERIC / NULLIF(COUNT(*), 0) * 100, 2) AS high_risk_txn_ratio,
+    COUNT(DISTINCT t.account_to) AS distinct_counterparties,
+    MAX(t.amount) AS max_single_txn,
+    MAX(t.transaction_date) AS last_transaction_date,
+    CASE 
+        WHEN c.risk_score >= 80 OR COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) >= 5 THEN 'Very High'
+        WHEN c.risk_score >= 60 OR COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) >= 3 THEN 'High'
+        WHEN c.risk_score >= 40 THEN 'Medium'
+        ELSE 'Low'
+    END AS risk_category,
+    NOW() AS loaded_at
+FROM silver.dim_customer c
+LEFT JOIN silver.transactions t ON c.customer_id = t.customer_from
+WHERE t.transaction_date >= CURRENT_DATE - 30     -- Last 30 days
+GROUP BY c.customer_id, c.full_name, c.risk_score;
+
+
+
+
+
+TRUNCATE TABLE gold.monthly_customer_metrics;
+
+INSERT INTO gold.monthly_customer_metrics
+SELECT 
+    c.customer_id,
+    TO_CHAR(t.transaction_date, 'YYYY-MM') AS year_month,
+    COUNT(*) AS total_transactions,
+    SUM(t.amount) AS total_volume,
+    AVG(t.amount) AS avg_transaction_amount,
+    MAX(t.amount) AS max_transaction_amount,
+    COUNT(DISTINCT t.account_to) AS distinct_counterparties,
+    COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) AS suspicious_transactions,
+    COUNT(CASE WHEN t.amount >= 50000 THEN 1 END) AS high_value_transactions,
+    ROUND(COUNT(*)::NUMERIC / GREATEST(1, COUNT(DISTINCT t.transaction_date)), 2) AS txn_frequency,
+    AVG(c.risk_score) AS risk_score_avg,
+    NOW() AS loaded_at
+FROM silver.dim_customer c
+JOIN silver.transactions t 
+    ON c.customer_id = t.customer_from
+WHERE t.transaction_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '6 months')
+GROUP BY c.customer_id, TO_CHAR(t.transaction_date, 'YYYY-MM')
+ORDER BY c.customer_id, year_month DESC;
+
+
+
+-- =============================================-- =============================================-- =============================================
+-- Gold Table: High Risk Entities
+-- =============================================
+CREATE TABLE IF NOT EXISTS gold.high_risk_entities (
+    entity_id               TEXT,                   -- customer_id or account_id
+    entity_type             TEXT,                   -- 'Customer' or 'Account'
+    entity_name             TEXT,
+    risk_category           TEXT,                   -- High, Very High, Critical
+    total_volume_30d        NUMERIC(20,2),
+    suspicious_txn_count    INTEGER,
+    high_value_txn_count    INTEGER,
+    distinct_counterparties INTEGER,
+    first_flagged_date      DATE,
+    last_flagged_date       DATE,
+    is_active               BOOLEAN DEFAULT TRUE,
+    notes                   TEXT,
+    loaded_at               TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (entity_id, entity_type)
+);
+
+-- TRUNCATE & LOAD Query
+TRUNCATE TABLE gold.high_risk_entities;
+
+INSERT INTO gold.high_risk_entities
+WITH customer_metrics AS (
+    SELECT 
+        c.customer_id AS entity_id,
+        'Customer' AS entity_type,
+        c.full_name AS entity_name,
+        SUM(t.amount) AS total_volume_30d,
+        COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) AS suspicious_txn_count,
+        COUNT(CASE WHEN t.amount >= 100000 THEN 1 END) AS high_value_txn_count,
+        COUNT(DISTINCT t.account_to) AS distinct_counterparties,
+        MIN(t.transaction_date) AS first_flagged_date,
+        MAX(t.transaction_date) AS last_flagged_date,
+        c.risk_score
+    FROM silver.dim_customer c
+    LEFT JOIN silver.transactions t 
+        ON c.customer_id = t.customer_from
+    WHERE t.transaction_date >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY c.customer_id, c.full_name, c.risk_score
+),
+account_metrics AS (
+    SELECT 
+        a.account_id AS entity_id,
+        'Account' AS entity_type,
+        a.account_type AS entity_name,
+        SUM(t.amount) AS total_volume_30d,
+        COUNT(CASE WHEN t.is_suspicious_flag = 1 THEN 1 END) AS suspicious_txn_count,
+        COUNT(CASE WHEN t.amount >= 100000 THEN 1 END) AS high_value_txn_count,
+        COUNT(DISTINCT CASE WHEN t.account_from = a.account_id THEN t.account_to 
+                           WHEN t.account_to = a.account_id THEN t.account_from END) AS distinct_counterparties,
+        MIN(t.transaction_date) AS first_flagged_date,
+        MAX(t.transaction_date) AS last_flagged_date
+    FROM silver.dim_account a
+    LEFT JOIN silver.transactions t 
+        ON a.account_id IN (t.account_from, t.account_to)
+    WHERE t.transaction_date >= CURRENT_DATE - INTERVAL '30 days'
+    GROUP BY a.account_id, a.account_type
+)
+SELECT 
+    entity_id,
+    entity_type,
+    entity_name,
+    CASE 
+        WHEN suspicious_txn_count >= 5 OR total_volume_30d >= 1000000 THEN 'Critical'
+        WHEN suspicious_txn_count >= 3 OR total_volume_30d >= 500000 THEN 'Very High'
+        WHEN suspicious_txn_count >= 1 OR total_volume_30d >= 200000 THEN 'High'
+        ELSE 'Medium'
+    END AS risk_category,
+    total_volume_30d,
+    suspicious_txn_count,
+    high_value_txn_count,
+    distinct_counterparties,
+    first_flagged_date,
+    last_flagged_date,
+    TRUE AS is_active,
+    NULL AS notes,
+    NOW() AS loaded_at
+FROM (
+    SELECT * FROM customer_metrics
+    UNION ALL
+    SELECT * FROM account_metrics
+) combined
+WHERE suspicious_txn_count > 0 
+   OR total_volume_30d >= 100000;     -- Only high risk entities
+

@@ -17,9 +17,6 @@ from bronze_file_processor_dag import bronze_file_processor_dag
 
 @dag(
     dag_id='bronze_dag',
-    params={
-        "run_date": None
-    },
     tags=['postgres', 'ddl', 'dynamic']
 )
 def bronze_dag():
@@ -61,7 +58,25 @@ def bronze_dag():
         id = dag_id+'_'+run_id
         print(id)
 
-        run_date = context['params'].get('run_date')
+        # run_date = context['params'].get('run_date')
+        conn = psycopg2.connect(
+        host="postgres",
+        database="airflow",
+        user="airflow",
+        password="airflow",
+        port=5432
+        )
+
+        sql = "select run_date from staging.metadata where layer_name='bronze'"
+
+        cursor = conn.cursor()
+        print(sql)
+        cursor.execute(sql)
+        run_date = cursor.fetchone()[0]
+        conn.commit()
+        run_date = run_date[:4]+run_date[5:7]+run_date[8:10]
+        print(run_date)
+
         OUTPUT_DIR = f"/opt/airflow/data/tm_source_data/{run_date}"
         for filename in os.listdir(OUTPUT_DIR+'/'):
             filepath = os.path.join(OUTPUT_DIR,filename)
@@ -70,28 +85,23 @@ def bronze_dag():
                 run_param = {"id": id,"filepath": filepath,"filename": filename}
                 trigger_params.append(run_param)
         
+        date1 = datetime.strptime(run_date, "%Y%m%d")
+        print(date1)
+        next_date = date1 + timedelta(days=1)
+        print(next_date)
+        next_date_1 = next_date.strftime('%Y-%m-%d')
+        print(next_date_1)
+
+        sql = f"update staging.metadata set run_date = '{next_date_1}' where layer_name='bronze'"
+
+        cursor = conn.cursor()
+        print(sql)
+        cursor.execute(sql)
+        conn.commit()
+        
         print(f"Will trigger child DAG {len(trigger_params)} times")
         return trigger_params
 
-    # @task
-    # def file_ingestor(trigger_list: list, **context):
-    #     """Trigger child DAG multiple times"""
-    #     triggered_runs = []
-        
-    #     for i, params in enumerate(trigger_list):
-    #         trigger = TriggerDagRunOperator(
-    #             task_id=f'trigger_child_{params["filename"]}',   # Unique task_id
-    #             trigger_dag_id='bronze_file_processor_dag',      # Child DAG ID
-    #             conf=params,                                   # Pass parameters
-    #             wait_for_completion=False,                     # Set True if you want sequential
-    #             reset_dag_run=True,
-    #             dag=context['dag'],                            # Important
-    #         )
-    #         trigger.execute(context=context)                   # Execute immediately
-    #         triggered_runs.append(params["filename"])
-    #         print(f"Triggered child DAG for region: {params['filename']}")
-        
-    #     return triggered_runs
 
     trigger_tasks = TriggerDagRunOperator.partial(
         task_id='trigger_child_dag',
@@ -102,9 +112,6 @@ def bronze_dag():
         conf=get_trigger_list()          # This creates multiple mapped tasks
     )
 
-    # Task Flow
-    # params_list = get_trigger_list()
-    # file_ingestor(params_list)
 
     get_trigger_list() >> trigger_tasks
 
