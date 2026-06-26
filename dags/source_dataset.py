@@ -157,21 +157,50 @@ def generate_daily_source(run_date):
 
 @dag(
     dag_id='source_data_dag',
-    params={
-        "run_date": None
-    },
     tags=['postgres', 'ddl', 'dynamic']
 )
 def source_data_dag():
     
     @task
     def generate_source_data(**context):
-        run_date = context['params'].get('run_date')
+        # run_date = context['params'].get('run_date')
+
+        conn = psycopg2.connect(
+        host="postgres",
+        database="airflow",
+        user="airflow",
+        password="airflow",
+        port=5432
+        )
+
+        sql = "select run_date from staging.metadata where layer_name='raw_data'"
+
+        cursor = conn.cursor()
+        print(sql)
+        cursor.execute(sql)
+        run_date = cursor.fetchone()[0]
+        conn.commit()
+        print(run_date)
+
         print("Before processing for",run_date)
         ti = context['ti'] 
         try:
             date_str = generate_daily_source(run_date)
             print("Files processed for",date_str)
+            date1 = datetime.strptime(run_date, "%Y%m%d")
+            print(date1)
+            next_date = date1 + timedelta(days=1)
+            print(next_date)
+            next_date_1 = next_date.strftime('%Y%m%d')
+            print(next_date_1)
+
+            sql = f"update staging.metadata set run_date = {next_date_1} where layer_name='raw_data'"
+
+            cursor = conn.cursor()
+            print(sql)
+            cursor.execute(sql)
+            conn.commit()
+
             ti.xcom_push(key='status_value', value='success')
         except:
             ti.xcom_push(key='status_value', value='failed')

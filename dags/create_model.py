@@ -20,7 +20,6 @@ def insert_data_in_staging(run_date, table_name, pk_cols, non_pk_cols, staging_t
     # We can call a stored procedure and use its output to populate staging table. For now, we will do a direct copy from bronze.
     collist = ','.join(pk_cols+non_pk_cols)
     
-
     conn = psycopg2.connect(
     host="postgres",
     database="airflow",
@@ -36,38 +35,13 @@ def insert_data_in_staging(run_date, table_name, pk_cols, non_pk_cols, staging_t
     cursor.execute(sql1)
     conn.commit()
     
-    sql2 = f'INSERT INTO staging.{table_name} ({collist}) SELECT {collist} from silver.{table_name}' 
+    sql2 = f'INSERT INTO staging.{table_name} ({collist}) SELECT {collist} from bronze.{table_name}' 
     print(sql2)
     cursor.execute(sql2)
     conn.commit()
 
-    # count = cursor.fetchone()[0]
-    # print(count)
     print("✅ SQL executed successfully")
 
-    
-
-    # call_scd2 = PostgresOperator(
-    #     task_id='scd2_upsert',
-    #     postgres_conn_id='postgres_default',
-    #     sql="""
-    #         CALL scd2_upsert(
-    #             p_run_date       := '{{ params.run_date }}'::DATE,
-    #             p_staging_table  := '{{ params.staging_table }}',
-    #             p_target_table   := '{{ params.target_table }}',
-    #             p_pk_columns     := '{{ params.pk_columns }}'::TEXT[],
-    #             p_non_pk_columns := '{{ params.non_pk_columns }}'::TEXT[]
-    #         );
-    #     """,
-    #     params={
-    #         "run_date": run_date,
-    #         "staging_table": {staging_table},
-    #         "target_table": {target_table},
-    #         "pk_columns": {pk_cols},
-    #         "non_pk_columns": {non_pk_cols}
-    #         }
-    #     )
-    # call_scd2
 
     with conn.cursor() as cur:
         cur.execute("""
@@ -80,10 +54,10 @@ def insert_data_in_staging(run_date, table_name, pk_cols, non_pk_cols, staging_t
             );
         """, (
             run_date,
-            {staging_table},
-            {target_table},
-            {pk_cols},
-            {non_pk_cols}
+            staging_table,
+            target_table,
+            pk_cols,
+            non_pk_cols
         ))
     conn.commit()
     print("Stored Procedure executed successfully")
@@ -117,7 +91,6 @@ def create_model_dag():
             non_pk_columns = context['params'].get('non_pk_columns')
             insert_data_in_staging(date, target_table.split('.')[1], pk_columns, non_pk_columns, staging_table, target_table)
             ti.xcom_push(key='status_value', value='success')
-        
         except:
             ti.xcom_push(key='status_value', value='failed')
 

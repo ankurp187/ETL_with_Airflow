@@ -17,7 +17,15 @@ DECLARE
     non_pk_list_s      TEXT;
     pk_hash_expr       TEXT;
     diff_hash_expr     TEXT;
+    stag_schema TEXT := split_part(p_staging_table,'.', 1);
+    stag_table TEXT := split_part(p_staging_table,'.', 2);
+    tgt_schema TEXT := split_part(p_target_table,'.', 1);
+    tgt_table TEXT := split_part(p_target_table,'.', 2);
 BEGIN
+
+    SET search_path = staging, bronze, public;
+
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 1 ===', p_target_table, p_run_date;
 
     -- 1. Build column lists
     SELECT string_agg(quote_ident(col), ', ')
@@ -36,49 +44,65 @@ BEGIN
       INTO non_pk_list_s
     FROM unnest(p_non_pk_columns) col;
 
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 2 ===', p_target_table, p_run_date;
+
     -- Build expressions for MD5
-    SELECT string_agg(quote_ident(col) || '::text', ',''::''')
+    -- SELECT string_agg(quote_ident(col) || '::text', ',''::''') INTO pk_hash_expr FROM unnest(p_pk_columns) col;
+
+    SELECT string_agg(quote_ident(col) || '::text', ',')
       INTO pk_hash_expr
     FROM unnest(p_pk_columns) col;
 
-    SELECT string_agg(quote_ident(col) || '::text', ',''::''')
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 3 ===', p_target_table, p_run_date;
+
+    -- SELECT string_agg(quote_ident(col) || '::text', ',''::''') INTO diff_hash_expr FROM unnest(p_non_pk_columns) col;
+
+    SELECT string_agg(quote_ident(col) || '::text', ',')
       INTO diff_hash_expr
     FROM unnest(p_non_pk_columns) col;
 
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 4 ===', p_target_table, p_run_date;
+
     -- Step 2: Add required columns if missing
     EXECUTE format('
-        ALTER TABLE %I 
+        ALTER TABLE %I.%I 
         ADD COLUMN IF NOT EXISTS hash_pk TEXT,
         ADD COLUMN IF NOT EXISTS hash_diff TEXT,
         ADD COLUMN IF NOT EXISTS rec_start DATE,
         ADD COLUMN IF NOT EXISTS rec_end DATE,
         ADD COLUMN IF NOT EXISTS is_active BOOLEAN;
-    ', p_staging_table);
+    ', stag_schema, stag_table);
+
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 5 ===', p_target_table, p_run_date;
+    RAISE NOTICE '=== Starting SCD2 for table %  === pk_hash_expr ===', pk_hash_expr;
+    RAISE NOTICE '=== Starting SCD2 for table %  === diff_hash_expr ===', diff_hash_expr;
 
     -- Step 3: Calculate hashes in staging
     EXECUTE format('
-        UPDATE %I
+        UPDATE %I.%I
         SET 
-            hash_pk   = MD5(CONCAT_WS('':::'', %s)),
-            hash_diff = MD5(CONCAT_WS('':::'', %s)),
+            hash_pk   = MD5(CONCAT_WS('','', %s)),
+            hash_diff = MD5(CONCAT_WS('','', %s)),
             rec_start = %L,
             rec_end   = ''9999-12-31''::DATE,
             is_active = TRUE
         WHERE hash_pk IS NULL OR hash_diff IS NULL;
     ', 
-        p_staging_table,
+        stag_schema, stag_table,
         pk_hash_expr,
         diff_hash_expr,
         p_run_date
     );
 
+    RAISE NOTICE '=== Starting SCD2 for table % on date % === NUMBER 6 ===', p_target_table, p_run_date;
+
     -- Step 4: SCD2 Merge Logic
     EXECUTE format($dynamic$
         WITH source AS (
-            SELECT * FROM %I
+            SELECT * FROM %I.%I
         ),
         expire_old AS (
-            UPDATE %I t
+            UPDATE %I.%I t
             SET rec_end   = %L::DATE - 1,
                 is_active = FALSE
             FROM source s
@@ -86,8 +110,8 @@ BEGIN
               AND t.is_active = TRUE
               AND t.hash_diff <> s.hash_diff
         )
-        INSERT INTO %I (
-            %s, hash_pk, hash_diff, rec_start, rec_end, is_active, loaded_at
+        INSERT INTO %I.%I (
+            %s, hash_pk, hash_diff, rec_start, rec_end, is_active--, loaded_at
         )
         SELECT 
             %s,
@@ -95,24 +119,24 @@ BEGIN
             s.hash_diff,
             s.rec_start,
             s.rec_end,
-            s.is_active,
-            NOW()
+            s.is_active--,
+            --NOW()
         FROM source s
         WHERE NOT EXISTS (
             SELECT 1 
-            FROM %I t 
+            FROM %I.%I t 
             WHERE t.hash_pk = s.hash_pk 
               AND t.is_active = TRUE
               AND t.hash_diff = s.hash_diff
         );
     $dynamic$,
-        p_staging_table,
-        p_target_table,
+        stag_schema,stag_table,
+        tgt_schema,tgt_table,
         p_run_date,
-        p_target_table,
+        tgt_schema,tgt_table,
         pk_list,
         pk_list_s,
-        p_target_table
+        tgt_schema,tgt_table
     );
 
     RAISE NOTICE 'SCD2 Upsert completed successfully for % on %', p_target_table, p_run_date;
@@ -145,7 +169,13 @@ ORDER BY routine_schema, routine_name;
 --AND routine_schema NOT IN ('pg_catalog', 'information_schema')
 
 
-
-
+--To test the procedure
+CALL staging.scd2_upsert(
+p_run_date       := '2026-06-15',
+p_staging_table  := 'staging.account_customer',
+p_target_table   := 'silver.account_customer',
+p_pk_columns     := ARRAY['account_id', 'customer_id'],
+p_non_pk_columns := ARRAY['relationship_type', 'start_date']
+);
 
 

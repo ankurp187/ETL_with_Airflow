@@ -17,8 +17,6 @@ import sys
 
 
 
-
-
 @dag(
     dag_id='trigger_model_dag',
     params={
@@ -51,7 +49,7 @@ def trigger_model_dag():
                 "staging_table": "staging.customers",
                 "target_table": "silver.customers",
                 "pk_columns": ["customer_id"],
-                "non_pk_columns": ['customer_id', 'full_name', 'date_of_birth', 'nationality', 'occupation', 'risk_score', 'record_date']
+                "non_pk_columns": ['full_name', 'date_of_birth', 'nationality', 'occupation', 'risk_score', 'record_date']
             },
             {
                 "id":id,
@@ -83,7 +81,7 @@ def trigger_model_dag():
                 "staging_table": "staging.transactions",
                 "target_table": "silver.transactions",
                 "pk_columns": ["transaction_id"],
-                "non_pk_columns": ['transaction_id', 'transaction_date', 'transaction_timestamp', 'account_from', 'account_to', 'amount', 'currency', 'transaction_type', 'description', 'channel']
+                "non_pk_columns": ['transaction_date', 'transaction_timestamp', 'account_from', 'account_to', 'amount', 'currency', 'transaction_type', 'description', 'channel']
             }
         ]
 
@@ -96,22 +94,6 @@ def trigger_model_dag():
     ).expand(
         conf=get_table_configs()          # This creates multiple mapped tasks
     )
-
-    # scd2_tasks = PostgresOperator.partial(
-    #     task_id='scd2_upsert',
-    #     postgres_conn_id='postgres_default',
-    #     sql="""
-    #         CALL scd2_upsert(
-    #             p_run_date := '{{ ds }}'::DATE,
-    #             p_staging_table := '{{ params.staging_table }}',
-    #             p_target_table := '{{ params.target_table }}',
-    #             p_pk_columns := '{{ params.pk_columns }}'::TEXT[],
-    #             p_natural_key := '{{ params.natural_key }}'
-    #         );
-    #     """
-    # ).expand(
-    #     params=get_table_configs()
-    # )
     
     get_table_configs() >> trigger_tasks
 
