@@ -22,12 +22,17 @@ import sys
     params={
         "run_date": None
     },
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['silver'],
+    doc_md="""
+    # Triggering Model runs
+
+    This dag is used to trigger multiple model tables using create_model_dag. 
+    """
 )
 def trigger_model_dag():
 
 
-    @task
+    @task(task_display_name="Get Table Configurations")
     def get_table_configs(**context):
         run_date = context['params'].get('run_date')
 

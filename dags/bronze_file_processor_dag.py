@@ -24,7 +24,7 @@ import sys
         "filepath": None,
         "filename": None,
     },
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['bronze']
 )
 def bronze_file_processor_dag():
 
@@ -39,25 +39,10 @@ def bronze_file_processor_dag():
             df = pd.read_parquet(filepath)
             rec_cnt = len(df)
             print("Read",rec_cnt,"records in",filename,"for",table_name)
-            # print("Processing:",filepath)
             data_tuples = [tuple(x) for x in df.to_numpy()]
 
-            # Column names in the same order as your table
             columns = df.columns.tolist()
-            # col_details = df.columns
-            # print(col_details)
             print(columns)
-
-            # SQL Query
-            # insert_query = f"""
-            #     INSERT INTO public.stg_transactions ({', '.join(columns)})
-            #     VALUES %s
-            #     ON CONFLICT (transaction_id) DO UPDATE SET
-            #         amount = EXCLUDED.amount,
-            #         transaction_type = EXCLUDED.transaction_type,
-            #         loaded_at = NOW();
-            # """
-
 
             insert_query = f"""
                 INSERT INTO {schema_name}.{table_name} ({', '.join(columns)})
@@ -67,8 +52,8 @@ def bronze_file_processor_dag():
             print(insert_query)
 
             conn = psycopg2.connect(
-                host="postgres",           # Change as per your setup
-                database="airflow",        # your database name
+                host="postgres",           
+                database="airflow",
                 user="airflow",
                 password="airflow",
                 port=5432
@@ -80,7 +65,7 @@ def bronze_file_processor_dag():
                     cur, 
                     insert_query, 
                     data_tuples, 
-                    page_size=5000          # Adjust based on memory
+                    page_size=5000
                 )
                 
             conn.commit()
@@ -93,7 +78,7 @@ def bronze_file_processor_dag():
             ti.xcom_push(key='file_status_value', value='failed')
             ti.xcom_push(key='inserted_recs', value='-1')
     
-    @task
+    @task(task_display_name="Start Logging")
     def generate_writer_log(**context):
         id = context['params'].get('id')
         filename = context['params'].get('filename')
@@ -124,7 +109,7 @@ def bronze_file_processor_dag():
     )
 
 
-    @task(trigger_rule='all_done')
+    @task(trigger_rule='all_done',task_display_name="Update Load Status")
     def generate_updater_log(**context):
         id = context['params'].get('id')
         filename = context['params'].get('filename')

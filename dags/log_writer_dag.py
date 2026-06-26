@@ -19,11 +19,11 @@ import psycopg2
         ,"updated_records": None
         ,"comments": None
     },
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['logging']
 )
 def log_writer_dag():
 
-    @task
+    @task(task_display_name="Start Logging")
     def execute_dynamic_sql(**context):
 
         run_ID = context['params'].get('run_ID')
@@ -53,8 +53,6 @@ def log_writer_dag():
         cursor.execute(sql)
         conn.commit()
 
-        # count = cursor.fetchone()[0]
-        # print(count)
         print("✅ SQL executed successfully")
 
         conn.close()
@@ -62,5 +60,4 @@ def log_writer_dag():
     execute_dynamic_sql()
 
 
-# Instantiate the DAG
 log_writer_dag()

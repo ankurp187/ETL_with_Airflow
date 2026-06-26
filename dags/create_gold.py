@@ -8,7 +8,8 @@ from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 
 @dag(
-    dag_id='create_gold_dag'
+    dag_id='create_gold_dag',
+    tags=['gold'],
 )
 def create_gold_dag():
 

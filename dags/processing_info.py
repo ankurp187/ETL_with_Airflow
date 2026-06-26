@@ -13,11 +13,11 @@ import psycopg2
         "filename": None,
         "status": None
     },
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['logging']
 )
 def file_processing_log_dag():
 
-    @task
+    @task(task_display_name="File Processing Logs")
     def execute_dynamic_sql(**context):
         type = context['params'].get('type')
         id = context['params'].get('id')
@@ -58,5 +58,4 @@ def file_processing_log_dag():
     execute_dynamic_sql()
 
 
-# Instantiate the DAG
 file_processing_log_dag()

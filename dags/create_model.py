@@ -75,11 +75,18 @@ def insert_data_in_staging(run_date, table_name, pk_cols, non_pk_cols, staging_t
         "pk_columns": None,
         "non_pk_columns": None
     },
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['silver'],
+    doc_md="""
+    # Create Model tables
+
+    This dag is used to create model tables and log the status. 
+    """
 )
 def create_model_dag():
 
-    @task
+    @task(
+            task_display_name="Ingest into Model Table"
+    )
     def model_processor(**context):
         ti = context['ti']
         try:
@@ -94,10 +101,8 @@ def create_model_dag():
         except:
             ti.xcom_push(key='status_value', value='failed')
 
-
     
-    
-    @task
+    @task(task_display_name="Start Logging")
     def generate_writer_log(**context):
         id = context['params'].get('id')
         date = context['params'].get('date')
@@ -127,7 +132,7 @@ def create_model_dag():
     )
 
 
-    @task(trigger_rule='all_done')
+    @task(trigger_rule='all_done',task_display_name="Update Load Status")
     def generate_updater_log(**context):
         id = context['params'].get('id')
         date = context['params'].get('date')

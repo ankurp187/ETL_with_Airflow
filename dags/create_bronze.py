@@ -17,7 +17,10 @@ from bronze_file_processor_dag import bronze_file_processor_dag
 
 @dag(
     dag_id='bronze_dag',
-    tags=['postgres', 'ddl', 'dynamic']
+    tags=['bronze'],
+    doc_md="""
+    This DAG creates the tables from the files
+    """
 )
 def bronze_dag():
 
@@ -39,7 +42,7 @@ def bronze_dag():
         print("Testing:",filepath,"Got",cnt,"records")
         return cnt
     
-    @task
+    @task(task_display_name="Params for file_processor",doc_md="""Generates the trigger parameters for bronze_file_processor_dag""")
     def get_trigger_list(**context):
 
         trigger_params = []

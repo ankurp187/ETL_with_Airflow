@@ -16,29 +16,26 @@ def dynamic_postgres_dag():
 
     @task
     def print_params(**context):
-        """Just for visibility"""
+        """Just for visibility of context parameters"""
         sql = context['params'].get('sql_query')
         print("SQL that will be executed:")
         print(sql)
         return sql
 
-    # Execute dynamic SQL passed at runtime
-    # execute_sql = PostgresOperator(
-    #     task_id='execute_dynamic_sql',
-    #     postgres_conn_id='postgres_default',      # ← Change if needed
-    #     sql="{{ params.sql_query }}",             # ← This is the key: Jinja templating
-    # )
+    @task(
+            doc_md="""
+            ## SQL Query Executor
 
-    @task
+            **psycopg2:** This module is used to create connection with postgres
+            The query is executed with the help of this connection.
+            """,
+            task_display_name = "SQL Executor"
+    )
     def execute_dynamic_sql(**context):
         sql = context['params'].get('sql_query')
         
         if not sql or not sql.strip().upper().startswith(('ALTER', 'CREATE', 'DROP', 'INSERT', 'UPDATE')):
             raise ValueError("Invalid or unsafe SQL passed!")
-        
-        # hook = PostgresHook(postgres_conn_id='postgres_default')
-        # hook.run(sql)
-        # print("✅ SQL executed successfully")
 
         conn = psycopg2.connect(
         host="postgres",
@@ -53,8 +50,6 @@ def dynamic_postgres_dag():
         cursor.execute(sql)
         conn.commit()
 
-        # count = cursor.fetchone()[0]
-        # print(count)
         print("✅ SQL executed successfully")
 
         conn.close()
@@ -62,5 +57,4 @@ def dynamic_postgres_dag():
     print_params() >> execute_dynamic_sql()
 
 
-# Instantiate the DAG
 dynamic_postgres_dag()

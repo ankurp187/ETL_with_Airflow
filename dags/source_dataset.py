@@ -23,18 +23,9 @@ def generate_daily_source(run_date):
 
     OUTPUT_DIR = f"/opt/airflow/data/tm_source_data/{run_date}"
 
-    # print("Printing output directory 1 ",OUTPUT_DIR)
-    # print("OS PATH",os.path)
-
     os.makedirs(os.path.dirname(OUTPUT_DIR+'/'),exist_ok=True)
 
     print("Printing output directory 2 ",OUTPUT_DIR)
-
-    # date_obj = datetime.strptime(run_date, "%Y-%m-%d")
-
-    # print("Date OBJECT",date_obj)
-
-    # np.random.seed(BASE_SEED + int(date_obj.strftime("%Y%m%d")) % 10000)  # Reproducible per day
 
     np.random.seed(BASE_SEED + int(run_date) % 10000)  # Reproducible per day
 
@@ -51,8 +42,6 @@ def generate_daily_source(run_date):
         'record_date': run_date                     # For SCD2 tracking
     })
 
-    # print("Generating Customers MasterData")
-
     # ------------------ Accounts (Master + Daily Delta) ------------------
     account_types = ['Savings', 'Checking', 'Credit Card', 'Investment', 'Loan']
     accounts = pd.DataFrame({
@@ -64,8 +53,6 @@ def generate_daily_source(run_date):
         'balance': np.random.lognormal(8.5, 2.2, NUM_ACCOUNTS).round(2),
         'record_date': run_date
     })
-
-    # print("Generating Accounts MasterData")
 
     # ------------------ Account-Customer Relationship ------------------
     ac_rel = []
@@ -81,8 +68,6 @@ def generate_daily_source(run_date):
             })
     account_customer = pd.DataFrame(ac_rel)
 
-    # print("Generating Customer Account MasterData")
-
     # ------------------ Customer-Customer Relationship ------------------
     cc_rel = []
     for _ in range(int(NUM_CUSTOMERS * 0.12)):   # Reasonable number of relationships
@@ -95,18 +80,14 @@ def generate_daily_source(run_date):
         })
     customer_customer = pd.DataFrame(cc_rel)
 
-    # print("Generating Customer Customer MasterData")
-
     # ------------------ Transactions (Only for this day) ------------------
     num_tx = np.random.randint(8000, 15000)   # Realistic daily volume
 
     transactions = []
-    # print("Random transactions selected")
 
     for i in range(num_tx):
         acc_from = np.random.choice(accounts['account_id'])
         acc_to = np.random.choice(accounts['account_id'])
-        # print("Choosing random accounts")
         while acc_to == acc_from:
             acc_to = np.random.choice(accounts['account_id'])
 
@@ -114,12 +95,8 @@ def generate_daily_source(run_date):
         if np.random.rand() < 0.06:          # High value transactions
             amount *= np.random.uniform(5, 12)
         
-        # print("Multiplying the amount")
-
         time = datetime.now().strftime('%H:%M:S%')
         run_tmstmp = str(run_date)[:4]+'-'+str(run_date)[4:6]+'-'+str(run_date)[6:8] + ' ' + time
-
-        # run_date + timedelta(minutes=np.random.randint(0, 1440))
 
         transactions.append({
             'transaction_id': f'TX{run_date}{str(i+1).zfill(6)}',
@@ -133,8 +110,6 @@ def generate_daily_source(run_date):
             'description': np.random.choice(['Salary Credit', 'Rent Payment', 'Online Shopping', 'Vendor Payment', 'ATM Withdrawal', 'International Transfer']),
             'channel': np.random.choice(['Mobile App', 'Internet Banking', 'Branch', 'ATM', 'Third Party'])
         })
-
-        # print("Adding the transactions")
 
     transactions = pd.DataFrame(transactions)
 
@@ -157,13 +132,30 @@ def generate_daily_source(run_date):
 
 @dag(
     dag_id='source_data_dag',
-    tags=['postgres', 'ddl', 'dynamic']
+    schedule='0 6 * * *',
+    start_date=datetime(2025, 1, 1),
+    catchup=False,
+    tags=['source_data'],
+    doc_md="""
+    # Daily Source Data generator for the project
+
+    This dag gets triggered on daily basis at 6 UTC. 
+    The task **generate_source_data** fetches run_date from metadata and calls **generate_daily_source** with run_date.
+    The function **generate_daily_source** takes input from Metadata and creates source data in parquet format.
+    """
 )
 def source_data_dag():
     
-    @task
+    @task(
+        doc_md="""
+        ## Generate source data
+
+        **psycopg2:** This module is used to create connection with postgres
+        The run_date is fetched with the help of this connection and calls for **generate_daily_source**
+        """,
+        task_display_name = "Generate Source Data"
+    )
     def generate_source_data(**context):
-        # run_date = context['params'].get('run_date')
 
         conn = psycopg2.connect(
         host="postgres",
@@ -206,16 +198,16 @@ def source_data_dag():
             ti.xcom_push(key='status_value', value='failed')
         print("After processing",run_date)
     
-    @task
+    @task(
+            task_display_name="Start Logging"
+    )
     def generate_writer_log(**context):
         dag_id = context['dag'].dag_id
         run_id = context['run_id']
-        # task_id = context['task_instance'].task_id
         try_number = context['task_instance'].try_number
 
         print(dag_id)
         print(run_id[:-13])
-        # print(task_id)
         print(try_number)
 
         run_id = run_id[:-13]
@@ -250,16 +242,12 @@ def source_data_dag():
     )
 
 
-    @task(trigger_rule='all_done')
+    @task(trigger_rule='all_done',task_display_name="Update Load Status")
     def generate_updater_log(**context):
         dag_id = context['dag'].dag_id
         run_id = context['run_id']
-        # task_id = context['task_instance'].task_id
         try_number = context['task_instance'].try_number
 
-        # print(dag_id)
-        # print(run_id[:-13])
-        # print(task_id)
         print(try_number)
 
         run_id = run_id[:-13]
@@ -297,7 +285,6 @@ def source_data_dag():
         wait_for_completion=True
     )
     
-    # log_writer_dag >> generate_source_data() >> log_enddate_updater_dag
     log_writer_conf >> trigger_log_writer >> generate_source_data() >> log_updater_conf >> trigger_log_updater
 
 source_data_dag()
